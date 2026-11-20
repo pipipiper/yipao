@@ -58,6 +58,23 @@ struct ChargingRecord: Identifiable, Sendable {
         "\(start.timeIntervalSince1970)/\(kind.rawValue)"
     }
 
+    var timeRangeText: String {
+        let calendar = ChargingPeriod.calendar
+        let locale = Locale(identifier: "en_US_POSIX")
+        let dateTime = Date.VerbatimFormatStyle(
+            format: "\(year: .defaultDigits).\(month: .twoDigits).\(day: .twoDigits) \(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased)):\(minute: .twoDigits)",
+            locale: locale, timeZone: calendar.timeZone, calendar: calendar
+        )
+        let startText = start.formatted(dateTime)
+        guard let end else { return startText }
+        let time = Date.VerbatimFormatStyle(
+            format: "\(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased)):\(minute: .twoDigits)",
+            locale: locale, timeZone: calendar.timeZone, calendar: calendar
+        )
+        let endText = end.formatted(calendar.isDate(start, inSameDayAs: end) ? time : dateTime)
+        return "\(startText)-\(endText)"
+    }
+
     init?(raw: JSONValue) {
         guard let start = Self.timestamp(raw["chargeGunStartTs"]) ?? Self.timestamp(raw["chargeEarliestTs"]) else {
             return nil

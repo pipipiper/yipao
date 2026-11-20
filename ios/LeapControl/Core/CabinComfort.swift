@@ -42,7 +42,7 @@ enum SeatPosition: String, CaseIterable, Identifiable, Sendable {
     static let rear: [SeatPosition] = [.leftRear, .rightRear]
 }
 
-/// 座椅的两条通道。整页只有一个当前通道，切换只换视图，不下发。
+/// 座椅的加热和通风通道，各自上报档位。
 enum SeatComfortChannel: String, CaseIterable, Identifiable, Sendable {
     case heating
     case ventilation

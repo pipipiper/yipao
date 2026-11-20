@@ -147,7 +147,7 @@ struct FeatureCenterView: View {
     private var reviewSafeControls: some View {
         FeatureGroupCard(title: "常用功能") {
             NavigationLink {
-                ClimateView().toolbar(.hidden, for: .tabBar)
+                CabinClimateView().toolbar(.hidden, for: .tabBar)
             } label: {
                 FeatureGridCell(title: "空调", detail: "温度、模式与风量", symbol: "fan.fill")
             }
@@ -243,7 +243,7 @@ struct ControlFeatureDestination: View {
             case .batteryPreheat: BatteryPreheatPreviewView()
             case .chargePlan: ChargePlanPreviewView()
             case .chargingHistory: ChargingHistoryView()
-            case .comfortCabin: ComfortCabinView()
+            case .comfortCabin: CabinClimateView(initialTab: .comfort)
             case .fridge: FridgeView()
             }
         }

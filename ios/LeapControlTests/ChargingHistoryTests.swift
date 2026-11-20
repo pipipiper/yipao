@@ -74,6 +74,23 @@ struct ChargingHistoryTests {
         }
     }
 
+    @Test("明细合并开始与结束时间，北京时间跨天时保留两边日期")
+    func timeRangeText() throws {
+        let formatter = ISO8601DateFormatter()
+        let start = try #require(formatter.date(from: "2026-11-19T13:43:00Z"))
+        let sameDayEnd = try #require(formatter.date(from: "2026-11-19T14:15:00Z"))
+        let nextDayEnd = try #require(formatter.date(from: "2026-11-20T14:15:00Z"))
+        func record(ending end: Date?) throws -> ChargingRecord {
+            try #require(ChargingRecord(raw: .object([
+                "chargeGunStartTs": .number(start.timeIntervalSince1970 * 1_000),
+                "chargeGunEndTs": end.map { .number($0.timeIntervalSince1970 * 1_000) } ?? .null
+            ])))
+        }
+        #expect(try record(ending: sameDayEnd).timeRangeText == "2026.11.19 21:43-22:15")
+        #expect(try record(ending: nextDayEnd).timeRangeText == "2026.11.19 21:43-2026.11.20 22:15")
+        #expect(try record(ending: nil).timeRangeText == "2026.11.19 21:43")
+    }
+
     private func decode(_ json: String) throws -> JSONValue {
         try JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
     }

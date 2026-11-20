@@ -11,50 +11,28 @@ struct ChargeView: View {
         ZStack {
             LeapBackground(tint: state?.isCharging == true ? LeapStyle.accent : LeapStyle.cool)
 
-            // 撤掉预约充电和电池预热之后这页只剩两块，下半屏空掉快一半。
-            // 和首页、空调页同一套办法：给电量那块留出呼吸，指标格贴着底部，
-            // 中间不留缺口。
             GeometryReader { proxy in
-            ScrollView {
-                // 预约充电和电池预热都已撤下，实测在真车上不生效：
-                // 预约充电那张卡只是把车况的 chargeTimeSetting 显示出来，改不了预约设置
-                //   （真正的预约走 appointment 端点，state 格式没有已验证样本）；
-                // 电池预热发的是 cmdid 160，车辆没有响应，且 ptcState 的枚举没确认，
-                //   连"有没有生效"都判断不了。
-                VStack(spacing: 14) {
-                    // 上面这个 Spacer 封了顶：不封的话两个 Spacer 平分，
-                    // 电量数字会掉到屏幕正中，标题栏底下空出一大片什么都没有。
-                    // 电量是这页的主角，让它靠上坐着，多出来的高度往下走。
-                    Spacer(minLength: 0).frame(maxHeight: 36)
-                    socHeader(size: socSize(in: proxy.size.height))
-                    chargingControls
-                    // 充电上限行下方摆充电计划卡：真实来自 commonConfig 的 config."3"。
-                    // 车端没这张表（S01/T03 那套，或没设过预约）就整卡不出现。
-                    if let plan = state?.chargePlan {
-                        chargePlanCard(plan)
+                ScrollView {
+                    LazyVStack(spacing: 16) {
+                        socHeader(size: socSize(in: proxy.size.height))
+                        chargingControls
+                        if let plan = state?.chargePlan {
+                            chargePlanCard(plan)
+                        }
+                        metricsGrid
+                        ChargingHistorySection(embedded: true)
+                            .padding(.top, 8)
                     }
-                    Spacer(minLength: 0)
-                    metricsGrid
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, 24)
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 24)
-                .frame(minHeight: proxy.size.height)
-            }
-            .scrollIndicators(.hidden)
-            .refreshable { await store.refresh(refreshConfig: true) }
+                .scrollIndicators(.hidden)
+                .refreshable { await store.refresh(refreshConfig: true) }
             }
         }
-        // 叫「能源」而不是「电池与充电」：增程车这页还要放油量和汽油续航，
-        // 原来那个名字容不下油。
         .navigationTitle("能源")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            NavigationLink {
-                ChargingHistoryView()
-            } label: {
-                Label("充电记录", systemImage: "clock.arrow.circlepath")
-            }
-        }
     }
 
     // MARK: - 启停充电 / 解锁充电枪

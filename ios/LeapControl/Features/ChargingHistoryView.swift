@@ -2,25 +2,37 @@ import Charts
 import SwiftUI
 
 struct ChargingHistoryView: View {
-    @Environment(VehicleStore.self) private var store
-
     var body: some View {
-        Group {
-            if let vehicle = VehicleIdentity(session: store.session) {
-                ChargingHistoryContent(vehicle: vehicle)
-                    .id(vehicle)
-            } else {
-                ContentUnavailableView("请先选择车辆", systemImage: "car")
-            }
+        ScrollView {
+            ChargingHistorySection()
+                .padding(16)
+                .padding(.bottom, 8)
         }
+        .scrollIndicators(.hidden)
+        .background { LeapBackground(tint: LeapStyle.cool) }
         .navigationTitle("充电记录")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
     }
 }
 
+struct ChargingHistorySection: View {
+    @Environment(VehicleStore.self) private var store
+    var embedded = false
+
+    var body: some View {
+        if let vehicle = VehicleIdentity(session: store.session) {
+            ChargingHistoryContent(vehicle: vehicle, embedded: embedded)
+                .id(vehicle)
+        } else {
+            ContentUnavailableView("请先选择车辆", systemImage: "car")
+        }
+    }
+}
+
 private struct ChargingHistoryContent: View {
     let vehicle: VehicleIdentity
+    let embedded: Bool
 
     @Environment(VehicleStore.self) private var store
     @State private var period = ChargingPeriod.week
@@ -58,41 +70,66 @@ private struct ChargingHistoryContent: View {
     }
 
     var body: some View {
-        List {
-            Section {
-                controls
-                summaryContent
-            } header: {
-                if store.isDemo { Text("演示数据") }
+        LazyVStack(alignment: .leading, spacing: 12) {
+            if embedded || store.isDemo {
+                HStack {
+                    if embedded {
+                        Text("充电记录")
+                            .font(.title3.weight(.semibold))
+                            .accessibilityAddTraits(.isHeader)
+                    }
+                    if store.isDemo {
+                        Text("演示数据")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if embedded { refreshButton }
+                }
+            }
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    controls
+                    Divider()
+                    summaryContent
+                }
             }
 
-            Section {
-                detailContent
-            } header: {
-                HStack {
-                    Text(detailQuery.interval == summaryQuery.interval ? "全部明细" : intervalTitle(detailQuery))
-                    Spacer()
-                    if selectedDate != nil {
-                        Button("显示全部") { selectedDate = nil }
-                            .textCase(nil)
-                    }
+            HStack {
+                Text(detailQuery.interval == summaryQuery.interval ? "全部明细" : intervalTitle(detailQuery))
+                    .font(.subheadline.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+                if selectedDate != nil {
+                    Button("显示全部") { selectedDate = nil }
                 }
-            } footer: {
-                Text("日期按北京时间显示")
             }
+            .padding(.horizontal, 4)
+
+            detailContent
+            Text("日期按北京时间显示")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
         }
-        .scrollContentBackground(.hidden)
-        .background { LeapBackground(tint: LeapStyle.cool) }
         .toolbar {
-            Button {
-                refreshID = UUID()
-            } label: {
-                Label("刷新充电记录", systemImage: "arrow.clockwise")
+            if !embedded {
+                ToolbarItem(placement: .topBarTrailing) { refreshButton }
             }
         }
         .task(id: summaryQuery) { [query = summaryQuery] in await loadSummary(query) }
         .task(id: detailQuery) { [query = detailQuery] in await loadFirstPage(query) }
         .onDisappear { moreTask?.cancel() }
+    }
+
+    private var refreshButton: some View {
+        Button {
+            refreshID = UUID()
+        } label: {
+            Image(systemName: "arrow.clockwise")
+                .frame(minWidth: 36, minHeight: 36)
+        }
+        .accessibilityLabel("刷新充电记录")
     }
 
     private var controls: some View {
@@ -164,16 +201,25 @@ private struct ChargingHistoryContent: View {
     @ViewBuilder
     private var detailContent: some View {
         ForEach(records) { record in
-            VStack(alignment: .leading, spacing: 6) {
-                LabeledContent(record.kind.rawValue, value: record.energy.map { "\(number($0)) kWh" } ?? "—")
-                Text(record.start, format: dateStyle.hour().minute())
-                    .font(.subheadline)
-                if let end = record.end {
-                    let endStyle = calendar.isDate(record.start, inSameDayAs: end) ? dateFormat : dateStyle
-                    LabeledContent("结束时间", value: end.formatted(endStyle.hour().minute()))
-                        .font(.caption)
+            GlassCard(radius: LeapStyle.tileRadius) {
+                VStack(alignment: .leading, spacing: 6) {
+                    LabeledContent {
+                        Text(record.energy.map { "\(number($0)) kWh" } ?? "—")
+                            .monospacedDigit()
+                    } label: {
+                        Label {
+                            Text(record.kind.rawValue)
+                        } icon: {
+                            Image(systemName: chargeSymbol(record.kind))
+                                .foregroundStyle(chargeTint(record.kind))
+                        }
+                    }
+                    Text(record.timeRangeText)
+                        .font(.subheadline.monospacedDigit())
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .accessibilityElement(children: .combine)
             }
         }
         if let detailError {
@@ -190,6 +236,22 @@ private struct ChargingHistoryContent: View {
             }
         } else if loadedPage == 0 && detailError != nil {
             Button("重试") { refreshID = UUID() }
+        }
+    }
+
+    private func chargeSymbol(_ kind: ChargingRecord.Kind) -> String {
+        switch kind {
+        case .fast: "bolt.fill"
+        case .slow: "powerplug.fill"
+        case .unknown: "questionmark.circle"
+        }
+    }
+
+    private func chargeTint(_ kind: ChargingRecord.Kind) -> Color {
+        switch kind {
+        case .fast: LeapStyle.accent
+        case .slow: LeapStyle.cool
+        case .unknown: .secondary
         }
     }
 

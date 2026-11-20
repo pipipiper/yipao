@@ -1,55 +1,84 @@
 import SwiftUI
 
-struct ClimateView: View {
+struct CabinClimateView: View {
+    enum Tab: String, CaseIterable {
+        case climate = "空调控制"
+        case comfort = "舒适座舱"
+    }
+
+    @Environment(VehicleStore.self) private var store
+    @State private var selection: Tab
+    @State private var temperaturePush: Task<Void, Never>?
+
+    init(initialTab: Tab = .climate) {
+        _selection = State(initialValue: initialTab)
+    }
+
+    private var tint: Color {
+        if selection == .comfort { return LeapStyle.frost }
+        guard store.climateOn else { return LeapStyle.cool.opacity(0.6) }
+        return store.climateMode == .hot ? LeapStyle.warm : LeapStyle.cool
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("座舱控制", selection: $selection) {
+                ForEach(Tab.allCases, id: \.self) { tab in
+                    Text(tab.rawValue).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+
+            switch selection {
+            case .climate:
+                ClimateView(temperaturePush: $temperaturePush)
+            case .comfort:
+                ComfortCabinView()
+            }
+        }
+        .background { LeapBackground(tint: tint) }
+        .navigationTitle("座舱控制")
+        .navigationBarTitleDisplayMode(.inline)
+        .onDisappear {
+            temperaturePush?.cancel()
+            store.cancelPendingCabinPushes()
+        }
+    }
+}
+
+private struct ClimateView: View {
     @Environment(VehicleStore.self) private var store
 
-    /// 温度连点的防抖任务。只由 +/- 按钮启动——不能挂在温度值上观察，
-    /// 因为车况轮询也会写这个值，那样等于把车端自己的设定当成用户操作再发回去。
-    @State private var temperaturePush: Task<Void, Never>?
+    /// 只由温度按钮启动。切换顶部页签后仍可完成这一次调温。
+    @Binding var temperaturePush: Task<Void, Never>?
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// 到了无障碍字号，横排的东西基本都放不下了，几处布局要换成竖排。
     private var isAccessibilitySize: Bool { dynamicTypeSize.isAccessibilitySize }
 
-    private var tint: Color {
-        guard store.climateOn else { return LeapStyle.cool.opacity(0.6) }
-        return store.climateMode == .hot ? LeapStyle.warm : LeapStyle.cool
-    }
-
     var body: some View {
-        @Bindable var store = store
-
-        ZStack {
-            LeapBackground(tint: tint)
-
-            // 内容比屏幕短。原来只在内循环和快捷动作之间放一个 Spacer，
-            // 于是多出来的两三百点全堆在那一处，成了页面中间一个洞。
-            // 改成三个 Spacer 分摊：温度盘上下各一份，快捷动作上面一份——
-            // 温度盘是这页的主视觉，让它跟首页的车图一样占住上半屏，
-            // 剩下的空白就是间距，而不是缺口。
-            GeometryReader { proxy in
-                ScrollView {
-                    VStack(spacing: 14) {
-                        Spacer(minLength: 0)
-                        temperatureDial
-                        Spacer(minLength: 0)
-                        modePicker
-                        modeNotice
-                        fanControl
-                        circulationRow
-                        Spacer(minLength: 12)
-                        quickActions
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 20)
-                    .frame(minHeight: proxy.size.height)
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(spacing: 14) {
+                    Spacer(minLength: 0)
+                    temperatureDial
+                    Spacer(minLength: 0)
+                    modePicker
+                    modeNotice
+                    fanControl
+                    circulationRow
+                    Spacer(minLength: 12)
+                    quickActions
                 }
-                .scrollIndicators(.hidden)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 20)
+                .frame(minHeight: proxy.size.height)
             }
+            .scrollIndicators(.hidden)
         }
-        .navigationTitle("空调")
-        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             // 预约空调（cmdid 171）。用视图型 NavigationLink 而不是 value 型：
             // 这棵 NavigationStack 走数组路径，二级页注册的 navigationDestination 会被吞掉，
@@ -81,8 +110,6 @@ struct ClimateView: View {
                 .commandBusy(store.isSendingCommand)
             }
         }
-        // 调完温度立刻退出去的话，那条还没发的指令就不该再发了。
-        .onDisappear { temperaturePush?.cancel() }
     }
 
     // MARK: - 温度

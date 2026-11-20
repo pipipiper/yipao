@@ -7,33 +7,20 @@ import SwiftUI
 /// 所以这里没有「高亮的是本机记录」那种免责声明——草稿只活在点击到车确认之间。
 struct ComfortCabinView: View {
     @Environment(VehicleStore.self) private var store
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
-
-    /// 当前看的是加热还是通风。纯视图状态，不下发。
-    @State private var channel: SeatComfortChannel = .heating
     @State private var confirmingCloseAll = false
 
-    private var isAccessibilitySize: Bool { dynamicTypeSize.isAccessibilitySize }
-
-    private var tint: Color {
-        channel == .heating ? LeapStyle.warm : LeapStyle.cool
-    }
-
     var body: some View {
-        ConnectedFeatureScaffold(title: "舒适座舱", tint: tint) {
+        ScrollView {
             VStack(spacing: 16) {
-                // 两条通道都读不到任何座位时，分段和座位图整块不画——
-                // 不然剩一个只有方向盘图标的空框，等于摆了个点不动的格子。
-                if hasAnySeat {
-                    channelPicker
-                    if hasSeatInChannel { seatMap }
-                }
+                if hasAnySeat { seatMap }
                 if store.steeringWheelLevel != nil { steeringWheelCard }
                 if store.mirrorHeatingOn != nil { mirrorCard }
                 if !hasAnything { emptyNotice }
             }
+            .padding(16)
+            .padding(.bottom, 8)
         }
+        .scrollIndicators(.hidden)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -57,22 +44,16 @@ struct ComfortCabinView: View {
         } message: {
             Text("会把当前开着的座椅、方向盘和后视镜逐条关掉。")
         }
-        // 调完档位立刻退出去的话，那条还没发的指令就不该再发了。同空调页。
-        .onDisappear { store.cancelPendingCabinPushes() }
     }
 
     // MARK: - 有没有东西可显示
 
-    /// 任一通道、任一座位读得到。决定要不要画「加热 / 通风」分段。
     private var hasAnySeat: Bool {
-        SeatComfortChannel.allCases.contains { channel in
-            SeatPosition.allCases.contains { store.seatLevel($0, channel) != nil }
-        }
+        SeatPosition.allCases.contains(where: hasControls)
     }
 
-    /// 当前通道下有座位可画。
-    private var hasSeatInChannel: Bool {
-        SeatPosition.allCases.contains { store.seatLevel($0, channel) != nil }
+    private func hasControls(_ position: SeatPosition) -> Bool {
+        SeatComfortChannel.allCases.contains { store.seatLevel(position, $0) != nil }
     }
 
     private var hasAnything: Bool {
@@ -86,170 +67,114 @@ struct ComfortCabinView: View {
         return seatOn || (store.steeringWheelLevel ?? 0) > 0 || store.mirrorHeatingOn == true
     }
 
-    /// 车况一项都没报回来时给一句话，而不是留一整屏空白。
-    /// 注意这不是「本车不支持」——入口本身已经过了支持门控（`VehicleStore.cabinComfortSupported`），
-    /// 走到这儿还全空，最常见的原因是车在休眠、这一轮车况字段缺了一片。
     private var emptyNotice: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 6) {
-                Label("暂时读不到座舱状态", systemImage: "moon.zzz.fill")
-                    .font(.subheadline.weight(.medium))
-                Text("车辆休眠时这一批字段会整片缺失。等车况刷新后会自动出现。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    // MARK: - ① 加热 / 通风
-
-    private var channelPicker: some View {
-        LeapGlassContainer(spacing: 10) {
-            Group {
-                if isAccessibilitySize {
-                    VStack(spacing: 4) { channelButtons }
+                if store.cabinComfortSupported {
+                    Label("暂时读不到座舱状态", systemImage: "moon.zzz.fill")
+                        .font(.subheadline.weight(.medium))
+                    Text("座舱控制会在车况刷新后显示。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 } else {
-                    HStack(spacing: 6) { channelButtons }
+                    Label("当前车辆暂无可用的座舱控制", systemImage: "carseat.right")
+                        .font(.subheadline.weight(.medium))
                 }
             }
-            .padding(5)
-            // 竖排时胶囊会鼓成大椭圆，换圆角矩形。两个分支形状类型不同，用 AnyShape 抹平。
-            // 同 `ClimateView.modePicker` 的处理。
-            .leapGlass(.regular, in: isAccessibilitySize
-                         ? AnyShape(.rect(cornerRadius: LeapStyle.cardRadius))
-                         : AnyShape(.capsule))
-        }
-        .animation(.snappy, value: channel)
-    }
-
-    @ViewBuilder
-    private var channelButtons: some View {
-        ForEach(SeatComfortChannel.allCases) { item in
-            Button {
-                channel = item
-            } label: {
-                Label(item.label, systemImage: item.symbol)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 11)
-                    .contentShape(.capsule)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(channel == item ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-            .background {
-                if channel == item {
-                    if isAccessibilitySize {
-                        RoundedRectangle(cornerRadius: 18).fill(.primary.opacity(0.14))
-                    } else {
-                        Capsule().fill(.primary.opacity(0.14))
-                    }
-                }
-            }
-            .accessibilityAddTraits(channel == item ? [.isButton, .isSelected] : .isButton)
         }
     }
 
-    // MARK: - ② 车内俯视座位图
-
-    /// 这一行里真能读到档位的座位。整行都读不到就不画这一行——
-    /// 不摆灰格子、不写「本车不支持」，照「读不到就别显示」。
-    private func visibleSeats(_ row: [SeatPosition]) -> [SeatPosition] {
-        row.filter { store.seatLevel($0, channel) != nil }
-    }
+    // MARK: - 座椅
 
     private var seatMap: some View {
-        VStack(spacing: 18) {
-            // 仪表台那一道：方向盘正对主驾座位，一眼看出车头朝上、主驾在左。
-            // 用和座位行同宽同间距的两格来摆，图标才会正好压在主驾那一列上。
-            HStack(spacing: 26) {
-                Image(systemName: "steeringwheel")
-                    .font(.system(size: 17, weight: .light))
-                    .foregroundStyle(.tertiary)
-                    .frame(width: 64)
-                Color.clear.frame(width: 64, height: 1)
-            }
-            .accessibilityHidden(true)
+        GlassCard(radius: LeapStyle.cardRadius) {
+            VStack(spacing: 18) {
+                HStack(spacing: 16) {
+                    Image(systemName: "steeringwheel")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                    Color.clear.frame(maxWidth: .infinity).frame(height: 1)
+                }
+                .accessibilityHidden(true)
 
-            if !visibleSeats(SeatPosition.front).isEmpty {
-                seatRow(SeatPosition.front)
+                if SeatPosition.front.contains(where: hasControls) {
+                    seatRow(SeatPosition.front)
+                }
+                if SeatPosition.rear.contains(where: hasControls) {
+                    seatRow(SeatPosition.rear)
+                }
             }
-            if !visibleSeats(SeatPosition.rear).isEmpty {
-                seatRow(SeatPosition.rear)
-            }
+            .frame(maxWidth: 292)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 4)
         }
-        .padding(.vertical, 20)
-        .frame(maxWidth: 300)
-        .frame(maxWidth: .infinity)
-        .leapGlass(.regular, in: .rect(cornerRadius: 28))
-        .animation(.snappy, value: channel)
     }
 
     private func seatRow(_ row: [SeatPosition]) -> some View {
-        HStack(spacing: 26) {
+        HStack(alignment: .top, spacing: 16) {
             ForEach(row) { position in
-                if store.seatLevel(position, channel) != nil {
-                    seatTile(position)
-                } else {
-                    // 同一行里个别座位读不到：留一块等大的透明占位，
-                    // 这样左右两座不会因为少一个而跑到中间去。
-                    Color.clear.frame(width: 64, height: 93)
+                Group {
+                    if hasControls(position) {
+                        seatTile(position)
+                    } else {
+                        Color.clear
+                            .frame(height: 92)
+                            .accessibilityHidden(true)
+                    }
                 }
+                .frame(maxWidth: .infinity)
             }
         }
     }
 
     private func seatTile(_ position: SeatPosition) -> some View {
-        let level = store.seatLevel(position, channel) ?? 0
+        VStack(spacing: 5) {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(.primary.opacity(0.12))
+                .frame(height: 12)
+                .padding(.horizontal, 10)
+                .accessibilityHidden(true)
+
+            HStack(spacing: 4) {
+                ForEach(SeatComfortChannel.allCases) { channel in
+                    if let level = store.seatLevel(position, channel) {
+                        seatControl(position, channel: channel, level: level)
+                    }
+                }
+            }
+            .padding(4)
+            .background(.primary.opacity(0.07), in: .rect(cornerRadius: 14))
+
+            Text(position.label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+        }
+        .frame(maxWidth: 126)
+    }
+
+    private func seatControl(_ position: SeatPosition, channel: SeatComfortChannel, level: Int) -> some View {
+        let tint = channel == .heating ? LeapStyle.warm : LeapStyle.cool
         let isOn = level > 0
-        let fill: Color = isOn ? tint.opacity(0.24 + 0.26 * Double(level - 1)) : Color.primary.opacity(0.10)
 
         return Button {
             store.cycleSeat(position, channel)
         } label: {
-            VStack(spacing: 6) {
-                VStack(spacing: 3) {
-                    // 靠背
-                    RoundedRectangle(cornerRadius: 7)
-                        .fill(fill)
-                        .frame(width: 56, height: 16)
-                    // 坐垫 + 档位
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(fill)
-                        .frame(width: 64, height: 52)
-                        .overlay {
-                            if isOn {
-                                Text("\(level)")
-                                    .font(.system(size: 22, weight: .semibold, design: .rounded))
-                                    .monospacedDigit()
-                                    .contentTransition(.numericText())
-                                    .foregroundStyle(.primary)
-                            } else {
-                                Image(systemName: channel.symbol)
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundStyle(.tertiary)
-                            }
-                        }
-                        .overlay {
-                            if !isOn {
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(LeapStyle.glassEdge, lineWidth: 1)
-                            }
-                        }
-                }
-                Text(position.label)
-                    .font(.caption2)
-                    .foregroundStyle(isOn ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
+            VStack(spacing: 2) {
+                Image(systemName: channel.symbol)
+                    .font(.system(size: 16, weight: .semibold))
+                Text(level.formatted())
+                    .font(.caption2.weight(.semibold).monospacedDigit())
+                    .contentTransition(.numericText())
             }
-            .frame(width: 64, height: 93)
-            .contentShape(.rect(cornerRadius: 12))
+            .foregroundStyle(isOn ? AnyShapeStyle(tint) : AnyShapeStyle(.secondary))
+            .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
+            .background(isOn ? tint.opacity(0.18) : .clear, in: .rect(cornerRadius: 10))
+            .contentShape(.rect(cornerRadius: 10))
         }
         .buttonStyle(.plain)
         .animation(.snappy, value: level)
         .sensoryFeedback(.selection, trigger: level)
-        // 四块色块在 VoiceOver 里全念作「按钮」，分不出来，而且点击循环对它很不友好。
-        // 合成一个可调元素：上下轻扫加减档位，跟系统音量条一个用法。同空调页风量柱。
-        .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(position.label)座椅\(channel.label)")
         .accessibilityValue(isOn ? "\(level) 档" : "已关闭")
         .accessibilityAdjustableAction { direction in
@@ -261,7 +186,7 @@ struct ComfortCabinView: View {
         }
     }
 
-    // MARK: - ③ 方向盘加热
+    // MARK: - 方向盘加热
 
     private var steeringWheelCard: some View {
         let level = store.steeringWheelLevel ?? 0
@@ -314,7 +239,7 @@ struct ComfortCabinView: View {
         .sensoryFeedback(.selection, trigger: current)
     }
 
-    // MARK: - ④ 后视镜加热
+    // MARK: - 后视镜加热
 
     private var mirrorCard: some View {
         let on = store.mirrorHeatingOn ?? false

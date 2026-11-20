@@ -170,7 +170,7 @@ struct HomeView: View {
                 Group {
                     switch route {
                     case .charge: ChargeView()
-                    case .climate: ClimateView()
+                    case .climate: CabinClimateView()
                     case .location: VehicleLocationView()
                     case .trips: MileageStatsView()
                     case .settings: SettingsView()
