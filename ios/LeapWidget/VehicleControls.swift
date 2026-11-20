@@ -118,6 +118,7 @@ struct VehicleControlValueProvider: ControlValueProvider {
     /// 超时取 2.5 秒：控件没有时间线，系统要渲染时当场问值，等太久整个控件会渲染不出来。
     /// 拉不回来就退回旧快照，由 `VehicleControlValue` 那道 `isStale` 兜住方向。
     private static func snapshot() async -> VehicleSnapshot? {
+        guard SnapshotStore.hasSharedContainer else { return nil }
         let cached = SnapshotStore().read()
         if let cached, Date.now.timeIntervalSince(cached.updatedAt) < WidgetVehicleFetcher.reuseWindow {
             return cached

@@ -387,10 +387,11 @@ struct SnapshotStore: Sendable {
     static let unlockControlKind = "LeapUnlockControl"
     static let hornControlKind = "LeapHornControl"
 
+    private static let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)
+    static var hasSharedContainer: Bool { container != nil }
+
     private var fileURL: URL? {
-        FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: Self.appGroup)?
-            .appendingPathComponent("vehicle-snapshot.json")
+        Self.container?.appendingPathComponent("vehicle-snapshot.json")
     }
 
     func read() -> VehicleSnapshot? {
@@ -439,8 +440,12 @@ enum LeapWidgets {
     }
 
     /// 只刷跟车况有关的那几个表面。清会话、下发指令后都走它。
-    nonisolated static func reloadVehicleSurfaces() {
+    nonisolated static func reloadVehicleStatus() {
         WidgetCenter.shared.reloadTimelines(ofKind: SnapshotStore.widgetKind)
+    }
+
+    nonisolated static func reloadVehicleSurfaces() {
+        reloadVehicleStatus()
         WidgetCenter.shared.reloadTimelines(ofKind: SnapshotStore.lockWidgetKind)
         WidgetCenter.shared.reloadTimelines(ofKind: SnapshotStore.lockOnlyWidgetKind)
         WidgetCenter.shared.reloadTimelines(ofKind: SnapshotStore.unlockWidgetKind)
@@ -464,7 +469,7 @@ enum SharedSettings {
 
     /// 桌面卡片、锁屏和侧边按钮共用直控偏好；车锁控件仍由系统验证身份。
     static var widgetControlEnabled: Bool {
-        get { defaults?.object(forKey: widgetControlKey) as? Bool ?? true }
+        get { SnapshotStore.hasSharedContainer && (defaults?.object(forKey: widgetControlKey) as? Bool ?? true) }
         set { defaults?.set(newValue, forKey: widgetControlKey) }
     }
 

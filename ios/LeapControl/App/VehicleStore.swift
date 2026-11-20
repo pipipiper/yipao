@@ -121,6 +121,8 @@ final class VehicleStore {
     private let passwordStore = OperationPasswordStore()
     private let bleCertificateStore = BLEKeyCertificateStore()
     private let snapshotStore = SnapshotStore()
+    private let widgetStatusStore = WidgetStatusStore()
+    @ObservationIgnored private var lastPublishedWidgetStatus: WidgetStatusSnapshot?
     let bleController: BLEVehicleController
 
     /// 卡片点进来时要打开的页面。
@@ -132,6 +134,7 @@ final class VehicleStore {
         didSet {
             let vehicle = VehicleIdentity(session: session)
             if vehicle != VehicleIdentity(session: oldValue) {
+                clearFallbackWidgetStatus()
                 customVehiclePhoto = vehicle.flatMap(CustomVehiclePhoto.load(for:))
             }
         }
@@ -516,6 +519,7 @@ final class VehicleStore {
             session = await client.currentSession()
         }
         guard session.isLoggedIn else {
+            clearFallbackWidgetStatus()
             refreshBluetoothRuntime()
             return
         }
@@ -768,6 +772,7 @@ final class VehicleStore {
     ///   下拉/手动刷新传 `true`；轮询保持默认 `false`，走客户端按 VIN 的缓存。
     func refresh(showSpinner: Bool = false, refreshConfig: Bool = false) async {
         guard session.isLoggedIn, !isDemo, !fetchInFlight else { return }
+        let epoch = loginEpoch
         fetchInFlight = true
         if showSpinner { isRefreshing = true }
         defer { isRefreshing = false; fetchInFlight = false }
@@ -781,35 +786,63 @@ final class VehicleStore {
             let capabilitiesStale = session.vehicles.contains { $0.abilitiesStale || $0.sentinelStale }
             if session.vehicles.isEmpty || !didLoadVehiclesThisLaunch || capabilitiesStale {
                 _ = try await client.loadVehicles()
+                let refreshedSession = await client.currentSession()
+                guard !Task.isCancelled, epoch == loginEpoch else { return }
                 didLoadVehiclesThisLaunch = true
-                session = await client.currentSession()
+                session = refreshedSession
             }
+            let vehicle = VehicleIdentity(session: session)
             let fresh = try await client.fetchVehicleState(refreshConfig: refreshConfig)
+            let refreshedSession = await client.currentSession()
+            guard !Task.isCancelled, epoch == loginEpoch,
+                  vehicle == VehicleIdentity(session: session),
+                  vehicle == VehicleIdentity(session: refreshedSession) else { return }
             state = fresh
             lastUpdated = .now
             syncDraftsFromState(fresh)
             // 2D 车的车图是按车况叠出来的，门窗开合了要重叠一次。
             composeCarImage()
-            session = await client.currentSession()
+            session = refreshedSession
             refreshBluetoothRuntime()
+            if !SnapshotStore.hasSharedContainer { publishSnapshot() }
             await resolveLocationName()
-            publishSnapshot()
+            guard !Task.isCancelled, epoch == loginEpoch, vehicle == VehicleIdentity(session: session) else { return }
+            if SnapshotStore.hasSharedContainer { publishSnapshot() }
         } catch {
             show(error: error)
         }
     }
 
-    /// 把展示用的车况写进 App Group，供桌面卡片读取。
-    /// 只写非敏感字段——token 和操作密码始终留在 Keychain。
     private func publishSnapshot() {
         guard let state else { return }
-        snapshotStore.write(VehicleSnapshot.make(
+        let snapshot = VehicleSnapshot.make(
             state: state,
             vehicleName: vehicleName,
             locationName: locationName,
             updatedAt: lastUpdated ?? .now
-        ))
-        LeapWidgets.reloadVehicleSurfaces()
+        )
+        if SnapshotStore.hasSharedContainer {
+            snapshotStore.write(snapshot)
+            LeapWidgets.reloadVehicleSurfaces()
+        } else {
+            let status = WidgetStatusSnapshot(
+                soc: snapshot.soc,
+                rangeText: snapshot.mediumRangeText,
+                chargeState: state.chargeState,
+                updatedAt: snapshot.updatedAt
+            )
+            guard status.shouldPublish(after: lastPublishedWidgetStatus),
+                  widgetStatusStore.write(status) else { return }
+            lastPublishedWidgetStatus = status
+            LeapWidgets.reloadVehicleStatus()
+        }
+    }
+
+    private func clearFallbackWidgetStatus() {
+        guard !SnapshotStore.hasSharedContainer else { return }
+        lastPublishedWidgetStatus = nil
+        widgetStatusStore.clear()
+        LeapWidgets.reloadVehicleStatus()
     }
 
     /// 车辆坐标，**车端原样的 GCJ-02**，隐私模式下拿不到。
@@ -970,6 +1003,7 @@ final class VehicleStore {
     }
 
     func logout() async {
+        clearFallbackWidgetStatus()
         ReviewDemo.isActive = false
         loginEpoch += 1
         stopPolling()
@@ -994,6 +1028,7 @@ final class VehicleStore {
     }
 
     func resetSession() async {
+        clearFallbackWidgetStatus()
         loginEpoch += 1
         stopPolling()
         endForegroundVerification()
@@ -2227,6 +2262,7 @@ final class VehicleStore {
         // 靠进一次演示模式再退出（那条路上的 `logout()` 没有守卫）才解得开。以 client 手里的为准。
         let live = await client.currentSession()
         guard session.isLoggedIn || live.hasAnyCredential else { return }
+        clearFallbackWidgetStatus()
         stopPolling()
         endForegroundVerification()
         cancelBluetoothArmRetry()

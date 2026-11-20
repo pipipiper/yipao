@@ -137,11 +137,13 @@ struct VehicleControlIntent: AppIntent, LiveActivityIntent {
 enum WidgetControlUnavailable: LocalizedError {
     case noOperationPassword
     case trunkWhileDriving
+    case readOnlyWidget
 
     var errorDescription: String? {
         switch self {
         case .noOperationPassword: "本机没存操作密码，打开 App 控车"
         case .trunkWhileDriving: "行驶中不能操作尾门"
+        case .readOnlyWidget: "此版本的小组件只显示车况，请打开 App 控车"
         }
     }
 }
@@ -211,6 +213,7 @@ enum WidgetControlRunner {
     /// 控件也拉不起 App。这个 catch 不吞错误，只是让它在卡片上留下一句话；
     /// 记完立刻 reload，用户抬眼就能看见，而不是对着一张没有任何变化的卡片发呆。
     static func run(_ action: WidgetAction, desiredLock: Bool? = nil) async throws {
+        guard SnapshotStore.hasSharedContainer else { throw WidgetControlUnavailable.readOnlyWidget }
         // 灵动岛那一条要在**任何 guard 之前**起：按下去没成也得说话，
         // 而"本机没存操作密码"恰恰是最需要当场解释的那种失败。
         let before = SnapshotStore().read()
@@ -248,6 +251,7 @@ enum WidgetControlRunner {
     /// 超时或没登录就什么都不写——**绝不清空**，宁可让人看见一份旧车况，
     /// 也不能按一下刷新反而把卡片按空了。
     static func refreshSnapshot() async {
+        guard SnapshotStore.hasSharedContainer else { return }
         let before = SnapshotStore().read()
         let refreshed: VehicleSnapshot? = await WidgetTimeout.within(seconds: 10, fallback: nil) {
             let client = LeapClient()
@@ -409,7 +413,7 @@ enum WidgetControlRunner {
     /// （标记本身不敏感，密码始终留在钥匙串里）。真正下发时才去读钥匙串，
     /// 那时读不到就抛错并写到卡片上，不会静默。
     static var canDispatchDirectly: Bool {
-        SharedSettings.widgetControlEnabled && SharedSettings.hasSavedOperationPassword
+        SnapshotStore.hasSharedContainer && SharedSettings.widgetControlEnabled && SharedSettings.hasSavedOperationPassword
     }
 
     static func command(

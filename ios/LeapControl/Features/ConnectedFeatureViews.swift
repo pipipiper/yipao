@@ -28,7 +28,7 @@ struct ActionButtonGuideView: View {
                             Label("允许侧边按钮直接控车", systemImage: "button.programmable")
                         }
                         .tint(LeapStyle.accent)
-                        .disabled(!store.widgetControlEnabled && !store.hasSavedPassword)
+                        .disabled(!SnapshotStore.hasSharedContainer || (!store.widgetControlEnabled && !store.hasSavedPassword))
                     }
                     setupTimeline
                     limitationNote
@@ -236,7 +236,7 @@ struct LockScreenControlSetupView: View {
                             }
                         }
                         .tint(LeapStyle.accent)
-                        .disabled(!store.widgetControlEnabled && !store.hasSavedPassword)
+                        .disabled(!SnapshotStore.hasSharedContainer || (!store.widgetControlEnabled && !store.hasSavedPassword))
                     }
                     availableControls
                 }
@@ -342,7 +342,9 @@ struct WidgetControlSetupView: View {
                             Label {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text("卡片直接控车")
-                                    Text("关闭时先打开 App 完成验证")
+                                    Text(SnapshotStore.hasSharedContainer
+                                         ? "关闭时先打开 App 完成验证"
+                                         : "此签名版本的小组件显示只读车况")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -351,7 +353,7 @@ struct WidgetControlSetupView: View {
                             }
                         }
                         .tint(LeapStyle.accent)
-                        .disabled(!store.widgetControlEnabled && !store.hasSavedPassword)
+                        .disabled(!SnapshotStore.hasSharedContainer || (!store.widgetControlEnabled && !store.hasSavedPassword))
                     }
 
                     Label {

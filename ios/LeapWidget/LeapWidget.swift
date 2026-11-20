@@ -30,6 +30,7 @@ struct VehicleEntry: TimelineEntry {
     var snapshot: VehicleSnapshot
     /// 官方图层叠出来的车图，主 App 每次叠完写进 App Group。大卡和锁车卡的主视觉都用它。
     var carImage: Image?
+    var readOnlyStatus: WidgetStatusSnapshot?
 }
 
 /// WidgetKit 的 completion 不是 Sendable，直接捕进 Task 会被并发检查拦下。
@@ -48,10 +49,19 @@ struct VehicleProvider: TimelineProvider {
     static let refreshInterval: TimeInterval = 600
 
     func placeholder(in context: Context) -> VehicleEntry {
-        VehicleEntry(date: .now, snapshot: .placeholder)
+        VehicleEntry(date: .now, snapshot: .placeholder, readOnlyStatus: .preview)
+    }
+
+    private func readOnlyEntry(preview: Bool = false) -> VehicleEntry {
+        let status: WidgetStatusSnapshot? = WidgetStatusStore().read() ?? (preview ? .preview : nil)
+        return VehicleEntry(date: .now, snapshot: .placeholder, readOnlyStatus: status)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (VehicleEntry) -> Void) {
+        guard SnapshotStore.hasSharedContainer else {
+            completion(readOnlyEntry(preview: context.isPreview))
+            return
+        }
         completion(VehicleEntry(
             date: .now,
             snapshot: store.read() ?? .placeholder,
@@ -60,6 +70,11 @@ struct VehicleProvider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<VehicleEntry>) -> Void) {
+        guard SnapshotStore.hasSharedContainer else {
+            let entry = readOnlyEntry()
+            completion(Timeline(entries: [entry], policy: .after(entry.date.addingTimeInterval(Self.refreshInterval))))
+            return
+        }
         let sink = TimelineSink(completion)
         let cached = store.read()
 
@@ -112,14 +127,22 @@ struct VehicleProvider: TimelineProvider {
 struct VehicleWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: SnapshotStore.widgetKind, provider: VehicleProvider()) { entry in
-            VehicleWidgetView(snapshot: entry.snapshot, carImage: entry.carImage)
-                .containerBackground(.fill.tertiary, for: .widget)
+            Group {
+                if SnapshotStore.hasSharedContainer {
+                    VehicleWidgetView(snapshot: entry.snapshot, carImage: entry.carImage)
+                } else {
+                    ReadOnlyVehicleWidgetView(status: entry.readOnlyStatus)
+                }
+            }
+            .containerBackground(.fill.tertiary, for: .widget)
         }
         // 关掉系统默认边距，改由 VehicleWidgetView 自己控制。
         // 桌面上的默认边距实测只有 3pt 左右，和添加卡片时的预览也对不上。
         .contentMarginsDisabled()
         .configurationDisplayName("车辆状态")
-        .description("查看电量、续航和车辆锁定状态。")
+        .description(SnapshotStore.hasSharedContainer
+                     ? "查看电量、续航和车辆锁定状态。"
+                     : "查看电量、续航、充电状态和最近更新时间。")
         .supportedFamilies([
             .systemSmall,
             .systemMedium,
@@ -138,20 +161,34 @@ struct VehicleWidget: Widget {
 /// 它和「车辆状态」是两个 kind，也就是两条时间线。两条线各拉各的车况会让同一时刻
 /// 两张卡显示不同的瞬间（真出过），所以拉取那一步加了复用窗口：先跑的那条拉网络并
 /// 写回共享快照，后跑的那条直接复用——见 `WidgetVehicleFetcher.reuseWindow`。
+private struct VehicleLockCard: View {
+    let entry: VehicleEntry
+    var action: WidgetAction = .toggleLock
+
+    var body: some View {
+        if SnapshotStore.hasSharedContainer {
+            LockWidgetView(snapshot: entry.snapshot, carImage: entry.carImage, action: action)
+                .containerBackground(for: .widget) { LockWidgetBackground(snapshot: entry.snapshot) }
+        } else {
+            ReadOnlyVehicleWidgetView(status: entry.readOnlyStatus)
+                .containerBackground(.fill.tertiary, for: .widget)
+        }
+    }
+}
+
 struct VehicleLockWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(
             kind: SnapshotStore.lockWidgetKind,
             provider: VehicleProvider()
         ) { entry in
-            LockWidgetView(snapshot: entry.snapshot, carImage: entry.carImage)
-                .containerBackground(for: .widget) {
-                    LockWidgetBackground(snapshot: entry.snapshot)
-                }
+            VehicleLockCard(entry: entry)
         }
         .contentMarginsDisabled()
         .configurationDisplayName("车锁")
-        .description("车辆模型与锁车状态，点击卡片执行标题所示操作。")
+        .description(SnapshotStore.hasSharedContainer
+                     ? "车辆模型与锁车状态，点击卡片执行标题所示操作。"
+                     : "本签名版本显示只读车况，点击打开壹跑。")
         .supportedFamilies([.systemSmall])
     }
 }
@@ -159,12 +196,13 @@ struct VehicleLockWidget: Widget {
 struct VehicleLockOnlyWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: SnapshotStore.lockOnlyWidgetKind, provider: VehicleProvider()) { entry in
-            LockWidgetView(snapshot: entry.snapshot, carImage: entry.carImage, action: .lock)
-                .containerBackground(for: .widget) { LockWidgetBackground(snapshot: entry.snapshot) }
+            VehicleLockCard(entry: entry, action: .lock)
         }
         .contentMarginsDisabled()
         .configurationDisplayName("上锁车辆")
-        .description("车辆模型与锁车状态，点击卡片上锁车辆。")
+        .description(SnapshotStore.hasSharedContainer
+                     ? "车辆模型与锁车状态，点击卡片上锁车辆。"
+                     : "本签名版本显示只读车况，点击打开壹跑。")
         .supportedFamilies([.systemSmall])
     }
 }
@@ -172,12 +210,13 @@ struct VehicleLockOnlyWidget: Widget {
 struct VehicleUnlockWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: SnapshotStore.unlockWidgetKind, provider: VehicleProvider()) { entry in
-            LockWidgetView(snapshot: entry.snapshot, carImage: entry.carImage, action: .unlock)
-                .containerBackground(for: .widget) { LockWidgetBackground(snapshot: entry.snapshot) }
+            VehicleLockCard(entry: entry, action: .unlock)
         }
         .contentMarginsDisabled()
         .configurationDisplayName("解锁车辆")
-        .description("车辆模型与锁车状态，点击卡片解锁车辆。")
+        .description(SnapshotStore.hasSharedContainer
+                     ? "车辆模型与锁车状态，点击卡片解锁车辆。"
+                     : "本签名版本显示只读车况，点击打开壹跑。")
         .supportedFamilies([.systemSmall])
     }
 }
