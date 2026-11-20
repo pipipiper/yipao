@@ -48,6 +48,13 @@ struct ChargeView: View {
         // 原来那个名字容不下油。
         .navigationTitle("能源")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            NavigationLink {
+                ChargingHistoryView()
+            } label: {
+                Label("充电记录", systemImage: "clock.arrow.circlepath")
+            }
+        }
     }
 
     // MARK: - 启停充电 / 解锁充电枪

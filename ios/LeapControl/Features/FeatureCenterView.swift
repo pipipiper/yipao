@@ -7,6 +7,7 @@ enum ControlFeature: String, CaseIterable, Identifiable, Hashable {
     case bluetoothKey
     case batteryPreheat
     case chargePlan
+    case chargingHistory
     case comfortCabin
     case fridge
 
@@ -22,7 +23,7 @@ enum ControlFeature: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .actionButton, .lockScreen, .widgets, .bluetoothKey: .access
         case .comfortCabin, .fridge: .cabin
-        case .batteryPreheat, .chargePlan: .energy
+        case .batteryPreheat, .chargePlan, .chargingHistory: .energy
         }
     }
 
@@ -34,6 +35,7 @@ enum ControlFeature: String, CaseIterable, Identifiable, Hashable {
         case .bluetoothKey: "蓝牙钥匙"
         case .batteryPreheat: "电池预热"
         case .chargePlan: "充电计划"
+        case .chargingHistory: "充电记录"
         case .comfortCabin: "舒适座舱"
         case .fridge: "车载冰箱"
         }
@@ -47,6 +49,7 @@ enum ControlFeature: String, CaseIterable, Identifiable, Hashable {
         case .bluetoothKey: "近车直连与无感解锁"
         case .batteryPreheat: "立即或预约加热"
         case .chargePlan: "预约时段、目标电量与循环日"
+        case .chargingHistory: "周、月、年统计与明细"
         case .comfortCabin: "座椅加热通风、方向盘与后视镜"
         case .fridge: "制冷保温与离车保持"
         }
@@ -60,6 +63,7 @@ enum ControlFeature: String, CaseIterable, Identifiable, Hashable {
         case .bluetoothKey: "key.radiowaves.forward.fill"
         case .batteryPreheat: "thermometer.high"
         case .chargePlan: "bolt.badge.clock"
+        case .chargingHistory: "clock.arrow.circlepath"
         case .comfortCabin: "carseat.right.fill"
         case .fridge: "refrigerator.fill"
         }
@@ -238,6 +242,7 @@ struct ControlFeatureDestination: View {
             case .bluetoothKey: BluetoothFeatureOverview()
             case .batteryPreheat: BatteryPreheatPreviewView()
             case .chargePlan: ChargePlanPreviewView()
+            case .chargingHistory: ChargingHistoryView()
             case .comfortCabin: ComfortCabinView()
             case .fridge: FridgeView()
             }

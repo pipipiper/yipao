@@ -88,7 +88,7 @@ struct SettingsView: View {
                     Label {
                         VStack(alignment: .leading, spacing: 3) {
                             Text("显示车模型")
-                            Text("关闭后首页显示轮廓剪影")
+                            Text("关闭官方 2D / 3D 车图")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -97,6 +97,12 @@ struct SettingsView: View {
                     }
                 }
                 .tint(LeapStyle.accent)
+
+                NavigationLink {
+                    VehicleAppearanceView()
+                } label: {
+                    Label("爱车外观", systemImage: "paintpalette")
+                }
             } header: {
                 Text("外观")
             } footer: {

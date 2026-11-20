@@ -128,7 +128,28 @@ final class VehicleStore {
 
     // MARK: - 对外状态
 
-    private(set) var session: LeapSession
+    private(set) var session: LeapSession {
+        didSet {
+            let vehicle = VehicleIdentity(session: session)
+            if vehicle != VehicleIdentity(session: oldValue) {
+                customVehiclePhoto = vehicle.flatMap(CustomVehiclePhoto.load(for:))
+            }
+        }
+    }
+
+    private(set) var customVehiclePhoto: UIImage?
+
+    func saveCustomVehiclePhoto(_ data: Data, for vehicle: VehicleIdentity) throws {
+        guard vehicle == VehicleIdentity(session: session) else { throw LeapError.missingVehicle }
+        try CustomVehiclePhoto.save(data, for: vehicle)
+        customVehiclePhoto = UIImage(data: data)
+    }
+
+    func removeCustomVehiclePhoto(for vehicle: VehicleIdentity) throws {
+        guard vehicle == VehicleIdentity(session: session) else { throw LeapError.missingVehicle }
+        try CustomVehiclePhoto.remove(for: vehicle)
+        customVehiclePhoto = nil
+    }
     /// 每退出一次登录递增。RootView 拿它当 HomeView 的 id：
     /// 实测 iOS 26 上重登后 NavigationStack 会把上一段会话推着的页面（比如设置页）带回来，
     /// 换 id 强制整棵首页视图树重建，重登后一定从首页开始。
@@ -322,6 +343,7 @@ final class VehicleStore {
         #endif
         if demo { restored = ReviewDemo.session }
         self.session = restored
+        self.customVehiclePhoto = VehicleIdentity(session: restored).flatMap(CustomVehiclePhoto.load(for:))
         self.biometricEnabled = UserDefaults.standard.object(forKey: "biometricEnabled") as? Bool ?? true
         let directControlDefaultChanged = SharedSettings.defaults.map {
             SharedSettings.migrateDirectControlDefault(in: $0)
@@ -828,6 +850,18 @@ final class VehicleStore {
         } catch {
             return nil
         }
+    }
+
+    func loadChargingSummary(vehicle: VehicleIdentity, period: ChargingPeriod,
+                             interval: DateInterval) async throws -> ChargingSummary {
+        if isDemo { return try ReviewDemo.chargingSummary(period: period, interval: interval) }
+        return try await client.fetchChargingSummary(vehicle: vehicle, period: period, interval: interval)
+    }
+
+    func loadChargingRecordPage(vehicle: VehicleIdentity, interval: DateInterval,
+                                page: Int) async throws -> ChargingRecordPage {
+        if isDemo { return try ReviewDemo.chargingPage(interval: interval, page: page) }
+        return try await client.fetchChargingRecordPage(vehicle: vehicle, interval: interval, page: page)
     }
 
     /// 驻车照片只有最近一张；图片数据不写普通缓存，避免旧 URL 覆盖新照片。

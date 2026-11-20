@@ -56,6 +56,7 @@ struct HomeView: View {
     private static let tileFooterHeight: CGFloat = 18
 
     @Environment(VehicleStore.self) private var store
+    @AppStorage("vehicleHomeTheme") private var homeTheme = VehicleHomeTheme.automatic
     @State private var showWindows = false
     @State private var showTrunk = false
     @State private var showSunshade = false
@@ -85,6 +86,7 @@ struct HomeView: View {
 
     /// 背景色随车辆当前最显著的状态走。
     private var backgroundTint: Color {
+        if let tint = homeTheme.tint { return tint }
         if state?.isCharging == true { return LeapStyle.accent }
         if store.climateOn { return store.climateMode == .hot ? LeapStyle.warm : LeapStyle.cool }
         return LeapStyle.cool
@@ -855,14 +857,21 @@ private struct VehicleHero<Badge: View>: View {
                     // 1.35 不够：模型转到某些角度（车头朝下那侧）下沿会顶出画布被切掉。
                     // 多出来的高度是从上下两个 Spacer 里拿的，卡片位置不受影响。
                     .frame(height: size * 1.62)
-                    .opacity(is3DReady ? 1 : 0)
+                    .opacity(is3DReady && store.customVehiclePhoto == nil ? 1 : 0)
+                    .allowsHitTesting(store.customVehiclePhoto == nil)
                     // 回调丢失的兜底在 CarModel3DView 里：从 newInit 真正调下去才计时。
                     // 原来这里从视图创建起算 8 秒，在设置页里刚打开开关时首页被盖着、
                     // 布局没跑，模型还没开始起就被判成失败了。
                 }
                 // 占位一直垫在底下：3D 渲不出来时（车型没适配、WebGL 挂了）
                 // 它就是最终画面，而不是留一块空白。3D 出来后盖在它上面。
-                staticVehicle.opacity(is3DReady ? 0 : 1)
+                if let photo = store.customVehiclePhoto {
+                    layer(photo)
+                        .frame(maxWidth: .infinity)
+                        .frame(maxHeight: size * Self.staticHeightRatio)
+                } else {
+                    staticVehicle.opacity(is3DReady ? 0 : 1)
+                }
             }
             // 纯装饰。锁车状态由下面那排徽章负责播报，这里再念一遍「汽车」是噪音。
             .accessibilityHidden(true)

@@ -68,6 +68,56 @@ enum ReviewDemo {
         return session
     }
 
+    private static var chargingSamples: [(date: Date, energy: Double, type: String)] {
+        let calendar = ChargingPeriod.calendar
+        let today = calendar.startOfDay(for: .now)
+        let samples: [(daysAgo: Int, energy: Double, type: String)] = [
+            (0, 21.7, "QUICK"), (2, 15.3, "SLOW"), (5, 34.2, "QUICK"), (14, 18.6, "SLOW"), (47, 28.4, "QUICK")
+        ]
+        return samples.compactMap { sample in
+            calendar.date(byAdding: .day, value: -sample.daysAgo, to: today).map {
+                ($0, sample.energy, sample.type)
+            }
+        }
+    }
+
+    static func chargingSummary(period: ChargingPeriod, interval: DateInterval) throws -> ChargingSummary {
+        let calendar = ChargingPeriod.calendar
+        let samples = chargingSamples.filter { $0.date >= interval.start && $0.date < interval.end }
+        let energy = samples.reduce(0) { $0 + $1.energy }
+        let fast = samples.filter { $0.type == "QUICK" }.count
+        let buckets: [JSONValue] = samples.compactMap { sample in
+            guard let bucket = calendar.dateInterval(of: period.bucket, for: sample.date) else { return nil }
+            return .object([
+                "statisDay": .string(ChargingPeriod.apiDate(bucket.start)),
+                "chargeInEnergy": .number(sample.energy)
+            ])
+        }
+        return try ChargingSummary(data: .object([
+            "totalChargeCounts": .number(Double(samples.count)),
+            "totalChargeInEnergy": .number(energy),
+            "fastChargePercent": .number(samples.isEmpty ? 0 : Double(fast) / Double(samples.count) * 100),
+            "chargeStatisList": .array(buckets)
+        ]), interval: interval, period: period)
+    }
+
+    static func chargingPage(interval: DateInterval, page: Int) throws -> ChargingRecordPage {
+        let samples = chargingSamples.filter { $0.date >= interval.start && $0.date < interval.end }
+        let records: [JSONValue] = samples.map { sample in
+            let end = sample.date.addingTimeInterval(3_600)
+            return .object([
+                "chargeGunStartTs": .number(sample.date.timeIntervalSince1970 * 1_000),
+                "chargeGunEndTs": .number(end.timeIntervalSince1970 * 1_000),
+                "chargeType": .string(sample.type),
+                "chargeInEnergy": .number(sample.energy)
+            ])
+        }
+        return try ChargingRecordPage(data: .object([
+            "total": .number(Double(records.count)),
+            "list": .array(page == 1 ? records : [])
+        ]), page: page)
+    }
+
     /// 车况写的是**数字口径**（C11 那套信号 ID，见 `SignalSchema.numeric`）：车型既然立成 C11，
     /// signalMap 的形态也得跟着换，legacy 字段名在这套 schema 下一个都读不出来。
     /// 数字口径没有的字段（剩余能量、车外温度、数据时间…）不硬造——真 C11 也不报，

@@ -967,6 +967,53 @@ actor LeapClient {
         return nil
     }
 
+    // MARK: - 充电记录
+
+    func fetchChargingSummary(vehicle: VehicleIdentity, period: ChargingPeriod,
+                              interval: DateInterval) async throws -> ChargingSummary {
+        let path: String
+        var params = ["vin": vehicle.vin]
+        if period == .year {
+            path = "statistic/year"
+            params["year"] = String(ChargingPeriod.calendar.component(.year, from: interval.start))
+        } else {
+            path = "statistic/days"
+            params["startTime"] = ChargingPeriod.apiDate(interval.start)
+            params["endTime"] = ChargingPeriod.apiDate(interval.end)
+        }
+        let data = try await chargingRequest(path, params: params, vehicle: vehicle)
+        return try ChargingSummary(data: data, interval: interval, period: period)
+    }
+
+    func fetchChargingRecordPage(vehicle: VehicleIdentity, interval: DateInterval,
+                                 page: Int) async throws -> ChargingRecordPage {
+        let data = try await chargingRequest("daily/detail/page", params: [
+            "vin": vehicle.vin,
+            "startTime": ChargingPeriod.apiDate(interval.start),
+            "endTime": ChargingPeriod.apiDate(interval.end),
+            "pageNum": String(page),
+            "pageSize": String(ChargingRecordPage.size)
+        ], vehicle: vehicle)
+        return try ChargingRecordPage(data: data, page: page)
+    }
+
+    private func chargingRequest(_ path: String, params: [String: String],
+                                 vehicle: VehicleIdentity) async throws -> JSONValue {
+        guard VehicleIdentity(session: session) == vehicle else { throw LeapError.missingVehicle }
+        let response = try await newGatewayRequest(
+            url: "https://appgateway.leapmotor.com/carownerservice/charge/\(path)",
+            method: "POST",
+            params: params,
+            jsonBody: params,
+            vehicleContext: (accountId: vehicle.accountID, vin: vehicle.vin)
+        )
+        try Task.checkCancellation()
+        guard VehicleIdentity(session: session) == vehicle else { throw LeapError.missingVehicle }
+        try assertSuccess(response, fallback: "获取充电记录失败")
+        guard let data = response["data"] else { throw LeapError.decode("缺少充电数据") }
+        return data
+    }
+
     // MARK: - 蓝牙钥匙
 
     /// 官方 iOS 从 commoninfo/sync 读取车辆版本，用于选择认证和配置字段。
